@@ -1,42 +1,67 @@
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const cors = require('cors');
+import express from "express";
+import fs from "fs";
+import path from "path";
 
 const app = express();
-app.use(cors());
+const ROOT = "/results-root"; // volume Docker monté
 
-const ROOT = path.join(__dirname, 'results-root'); // racine où tu montes tes dossiers results
+// Vérifie que le dossier existe
+function ensureRoot(res) {
+  if (!fs.existsSync(ROOT)) {
+    res.status(500).json({ error: "results-root not mounted" });
+    return false;
+  }
+  return true;
+}
 
-app.get('/perf/applications', (req, res) => {
-  fs.readdir(ROOT, (err, files) => {
-    if (err) return res.status(500).send(err.message);
-    res.json(files); // chaque dossier = une application
-  });
+// Liste des applications
+app.get("/api/applications", (req, res) => {
+  if (!ensureRoot(res)) return;
+
+  const apps = fs
+    .readdirSync(ROOT)
+    .filter((f) => fs.statSync(path.join(ROOT, f)).isDirectory());
+
+  res.json(apps);
 });
 
-app.get('/perf/:app/runs', (req, res) => {
-  const appDir = path.join(ROOT, req.params.app);
-  fs.readdir(appDir, (err, files) => {
-    if (err) return res.status(500).send(err.message);
-    res.json(files); // chaque dossier = une exécution
-  });
+// Liste des runs d’une application
+app.get("/api/runs", (req, res) => {
+  if (!ensureRoot(res)) return;
+
+  const appName = req.query.app;
+  if (!appName) {
+    return res.status(400).json({ error: "Missing ?app= parameter" });
+  }
+
+  const dir = path.join(ROOT, appName, "runs");
+  if (!fs.existsSync(dir)) {
+    return res.status(404).json({ error: "Application not found" });
+  }
+
+  const runs = fs
+    .readdirSync(dir)
+    .filter((f) => fs.statSync(path.join(dir, f)).isDirectory());
+
+  res.json(runs);
 });
 
-app.get('/perf/:app/runs/:runId/summary', (req, res) => {
-  const file = path.join(ROOT, req.params.app, req.params.runId, 'summary.txt');
-  res.sendFile(file);
+// Détails d’un run
+app.get("/api/runs/:id", (req, res) => {
+  if (!ensureRoot(res)) return;
+
+  const appName = req.query.app;
+  if (!appName) {
+    return res.status(400).json({ error: "Missing ?app= parameter" });
+  }
+
+  const file = path.join(ROOT, appName, "runs", req.params.id, "summary.json");
+
+  if (!fs.existsSync(file)) {
+    return res.status(404).json({ error: "Run not found" });
+  }
+
+  res.json(JSON.parse(fs.readFileSync(file, "utf8")));
 });
 
-app.get('/perf/:app/runs/:runId/alerts', (req, res) => {
-  const file = path.join(ROOT, req.params.app, req.params.runId, 'alerts.txt');
-  res.sendFile(file);
-});
-
-app.get('/perf/:app/runs/:runId/diff', (req, res) => {
-  const file = path.join(ROOT, req.params.app, req.params.runId, 'diff.html');
-  res.sendFile(file);
-});
-
-const port = process.env.PORT || 4000;
-app.listen(port, () => console.log(`Perf API listening on ${port}`));
+app.listen(4000, () => console.log("API running on port 4000"));
