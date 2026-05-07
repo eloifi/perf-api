@@ -64,4 +64,50 @@ app.get("/api/runs/:id", (req, res) => {
   res.json(JSON.parse(fs.readFileSync(file, "utf8")));
 });
 
+// Comparaison entre deux runs
+app.get("/api/runs/:id/compare", (req, res) => {
+  if (!ensureRoot(res)) return;
+
+  const appName = req.query.app;
+  if (!appName) {
+    return res.status(400).json({ error: "Missing ?app= parameter" });
+  }
+
+  const runsDir = path.join(ROOT, appName, "runs");
+  const runIds = fs
+    .readdirSync(runsDir)
+    .filter((f) => fs.statSync(path.join(runsDir, f)).isDirectory());
+
+  runIds.sort(); // tri chronologique
+
+  const currentId = req.params.id;
+  const index = runIds.indexOf(currentId);
+
+  if (index <= 0) {
+    return res.json({ message: "No previous run to compare" });
+  }
+
+  const prevId = runIds[index - 1];
+
+  const current = JSON.parse(
+    fs.readFileSync(path.join(runsDir, currentId, "summary.json")),
+  );
+  const previous = JSON.parse(
+    fs.readFileSync(path.join(runsDir, prevId, "summary.json")),
+  );
+
+  const diff = {
+    currentId,
+    previousId: prevId,
+    metrics: {
+      p95: current.p95 - previous.p95,
+      p99: current.p99 - previous.p99,
+      errors: current.http_req_failed - previous.http_req_failed,
+    },
+  };
+
+  res.json(diff);
+});
+
+// Démarrage du serveur
 app.listen(4000, () => console.log("API running on port 4000"));
